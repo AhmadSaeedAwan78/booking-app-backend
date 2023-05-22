@@ -28,7 +28,7 @@ class CreateBookingRequest extends Request
     {
         return [
             'serviceId' => 'required|exists:services,id',
-            'date' => 'required|date_format:Y-m-d',
+            'date' => 'required|date_format:Y-m-d|before_or_equal:'.Carbon::now()->addDays('7')->format('Y-m-d').'|after:'.Carbon::now()->format('Y-m-d'),
             'startTime' => 'required|date_format:H:i',
             'endTime' => 'required|date_format:H:i|after:startTime',
             'people' => 'required|array|min:1',
@@ -42,6 +42,7 @@ class CreateBookingRequest extends Request
         return [
             'service_id.required' => 'Service is mendatory for booking.',
             'service_id.exists' => 'Invalid service.',
+            'date.before_or_equal' => 'Invalid date given.',
         ];
     }
 }

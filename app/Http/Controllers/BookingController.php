@@ -68,53 +68,12 @@ class BookingController extends Controller
 
         return AvailableSlotsResource::collection($slots);
        } catch (\Exception $e) {
-          return response()->json(['message' => 'something went wrong'], 500);
+          return response()->json(['message' => $e->getMessage()], 500);
        }
     }
 
-    protected function isSlotAvailable($service, $date, $startTime, $endTime, $requiredBookings = 1){
-        // Check if the requested time slot is within the opening hours and not in a break
-      try {
-        if (!$this->isWithinOpeningHours($startTime, $endTime, $service->getOpeningHours($date))) {
-            return false;
-        }
-        $startTimeString = $startTime->format('H:i');
-        $endTimeString = $endTime->format('H:i');
-        // Retrieve existing bookings for the given date
-        $existingBookings = Booking::where('service_id', $service->id)
-            ->whereDate('date', $date)
-            ->where(function ($query) use ($startTimeString, $endTimeString) {
-                $query->where(function ($query) use ($startTimeString, $endTimeString) {
-                    $query->where('start_time', '<', $endTimeString)
-                        ->where('end_time', '>', $startTimeString);
-                })->orWhere(function ($query) use ($startTimeString, $endTimeString) {
-                    $query->where('start_time', '>=', $startTimeString)
-                        ->where('start_time', '<', $endTimeString);
-                })->orWhere(function ($query) use ($startTimeString, $endTimeString) {
-                    $query->where('end_time', '>', $startTimeString)
-                        ->where('end_time', '<=', $endTimeString);
-                });
-            })->get();
-
-        // Check if the requested time slot overlaps with any existing bookings
-        $availableSeats = $service->no_of_seats;
-        foreach ($existingBookings as $booking) {
-            $bookingStartTime = Carbon::parse($booking->start_time);
-            $bookingEndTime = Carbon::parse($booking->end_time);
-
-            if ($startTime < $bookingEndTime && $endTime > $bookingStartTime) {
-                // Slot overlaps with an existing booking
-                $availableSeats--;
-            }
-        }
-        // Remaining Slots
-        return $availableSeats >= $requiredBookings;
-      } catch (\Exception $e) {
-        return response()->json(['message' => 'something went wrong'], 500);
-     }
-    }
-
     public function createBooking(CreateBookingRequest $request) {
+      try {
         $serviceId = $request->input('serviceId');
         $date = Carbon::parse($request->input('date'))->startOfDay();
         $startTime = Carbon::parse($request->input('startTime'));
@@ -138,19 +97,18 @@ class BookingController extends Controller
             return response()->json(['message' => 'Opening hours are not available for the given date'], 400);
         }
 
-        $slotDuration = $service->slot_duration + $service->clean_time;
 
         // Check if the requested time slot is within the opening hours and not in a break
-        if (!$this->isWithinOpeningHours($startTime, $endTime, $openingHours)) {
+        if (!$service->isWithinOpeningHours($startTime, $endTime, $openingHours)) {
             return response()->json(['message' => 'The requested time slot is not within the opening hours'], 400);
         }
 
-        if ($this->isWithinBreak($startTime, $service)) {
+        if ($service->isWithinBreak($startTime)) {
             return response()->json(['message' => 'The requested time slot is within a break'], 400);
         }
 
         // Check if the requested time slot is available
-        if (!$this->isSlotAvailable($service, $date, $startTime, $endTime, count($people))) {
+        if (!$service->isSlotAvailable($date, $startTime, $endTime, count($people))) {
             return response()->json(['message' => 'The requested time slot is not available'], 400);
         }
         $bookingData = [];
@@ -173,15 +131,9 @@ class BookingController extends Controller
         Booking::insert($bookingData);
 
         return response()->json(['message' => 'Booking created successfully']);
+      } catch(\Exception $e) {
+        return response()->json(['message' => $e->getMessage()], 500);
+      }
     }
 
-    private function isWithinOpeningHours($startTime, $endTime, $openingHours) {
-        $startOpeningHour = Carbon::parse($openingHours['start_time']);
-        $endOpeningHour = Carbon::parse($openingHours['end_time']);
-        return $startTime >= $startOpeningHour && $endTime <= $endOpeningHour;
-    }
-
-    private function isWithinBreak($time, $service) {
-        return $service->isWithinBreak($time);
-    }
 }

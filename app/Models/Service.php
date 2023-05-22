@@ -57,39 +57,42 @@ class Service extends Model
         return false;
     }
 
-    public function isSlotAvailable($time) {
-        // Convert the time to a Carbon instance
-        $time = Carbon::parse($time);
-        // Get the bookings for the service on the given date
-        $bookings = $this->bookings()
-                ->where(function ($query) use ($time) {
-                    $query->where(function ($query) use ($time) {
-                        $query->where('start_time', '<=', $time)
-                            ->where('end_time', '>', $time);
-                    })->orWhere(function ($query) use ($time) {
-                        $query->where('start_time', '>=', $time)
-                            ->where('start_time', '<', $time->copy()->addMinutes($this->duration));
-                    });
-                })->get();
-        // Get the maximum number of clients per slot for the service
-        $maxClientsPerSlot = $this->no_of_seats;
-
-        // Check if the time slot is booked out
-        if ($bookings->count() >= $maxClientsPerSlot) {
+   public function isSlotAvailable($date, $startTime, $endTime, $requiredBookings = 1){
+        // Check if the requested time slot is within the opening hours and not in a break
+        if (!$this->isWithinOpeningHours($startTime, $endTime, $this->getOpeningHours($date))) {
             return false;
         }
+        $startTimeString = $startTime->format('H:i');
+        $endTimeString = $endTime->format('H:i');
+        // Retrieve existing bookings for the given date
+        $existingBookings = $this->bookings()->where('service_id', $this->id)
+            ->whereDate('date', $date)
+            ->where(function ($query) use ($startTimeString, $endTimeString) {
+                $query->where(function ($query) use ($startTimeString, $endTimeString) {
+                    $query->where('start_time', '<', $endTimeString)
+                        ->where('end_time', '>', $startTimeString);
+                })->orWhere(function ($query) use ($startTimeString, $endTimeString) {
+                    $query->where('start_time', '>=', $startTimeString)
+                        ->where('start_time', '<', $endTimeString);
+                })->orWhere(function ($query) use ($startTimeString, $endTimeString) {
+                    $query->where('end_time', '>', $startTimeString)
+                        ->where('end_time', '<=', $endTimeString);
+                });
+            })->get();
 
-        // Check if the time slot falls within breaks or overlapping with existing bookings
-        foreach ($bookings as $booking) {
-            $start = Carbon::parse($booking->start_time);
-            $end = Carbon::parse($booking->end_time);
+        // Check if the requested time slot overlaps with any existing bookings
+        $availableSeats = $this->no_of_seats;
+        foreach ($existingBookings as $booking) {
+            $bookingStartTime = Carbon::parse($booking->start_time);
+            $bookingEndTime = Carbon::parse($booking->end_time);
 
-            if ($time->between($start, $end) || $start->between($time, $time->copy()->addMinutes($this->duration))) {
-                return false;
+            if ($startTime < $bookingEndTime && $endTime > $bookingStartTime) {
+                // Slot overlaps with an existing booking
+                $availableSeats--;
             }
         }
-
-        return true;
+        // Remaining Slots
+        return $availableSeats >= $requiredBookings;
     }
 
     public function isPublicHoliday($date) {
@@ -100,4 +103,9 @@ class Service extends Model
                 ->exists();
     }
 
+    function isWithinOpeningHours($startTime, $endTime, $openingHours) {
+        $startOpeningHour = Carbon::parse($openingHours['start_time']);
+        $endOpeningHour = Carbon::parse($openingHours['end_time']);
+        return $startTime >= $startOpeningHour && $endTime <= $endOpeningHour;
+    }
 }
